@@ -51,7 +51,7 @@ function _isprincipal_maximal(a::AlgAssAbsOrdIdl, M, side = :right)
     fl, gen = _is_principal_maximal_simple_component(ainB, MinB, side)
     #@show "not simple for component", B
     if !fl
-      #@info "Not maximal over dimension $(dim(B))"
+      @vprint :PIP "Not maximal over component of dimension $(dim(B))"
       return false, zero(A)
     end
     push!(gens, mB(gen))
@@ -479,7 +479,7 @@ function _isprincipal(a::AlgAssAbsOrdIdl, O, side = :right)
   end
   @hassert :PIP 1 beta * OA == aOA
 
-  @info "Computing K1..."
+  @vprint :PIP "Computing K1..."
   #@show F, FinZ
   k1 = K1_order_mod_conductor(O, OA, F, FinZ)
   OZ = maximal_order(Z)
@@ -525,7 +525,7 @@ function _isprincipal(a::AlgAssAbsOrdIdl, O, side = :right)
 
   ##@show mQuni\(mQ(OZ(normred_over_center(elem_in_algebra(UU), ZtoA)))) ==  mQuni\(mQ(OZ(normred_over_center(beta * elemA, ZtoA))))
 
-  @info "Lifting to norm one unit"
+  @vprint :PIP "Lifting to norm one unit"
   V = lift_norm_one_unit( UU^(-1) * OA(elemA)  * OA(beta), F)
 
   gamma =  beta * inv(elem_in_algebra(UU) * V)
@@ -1506,7 +1506,6 @@ function _unit_group_generators_maximal_simple(M)
   A = algebra(M)
   ZA, ZAtoA = _as_algebra_over_center(A)
   if isdefined(A, :isomorphic_full_matrix_algebra)
-    #@info "Full matrix algebra unit group"
     B, AtoB = A.isomorphic_full_matrix_algebra
     OB = _get_order_from_gens(B, [AtoB(elem_in_algebra(b)) for b in absolute_basis(M)])
     N, S = nice_order(OB)
@@ -1519,8 +1518,6 @@ function _unit_group_generators_maximal_simple(M)
     @assert all(b in M for b in gens_in_M)
     return gens_in_M
  elseif dim(ZA) == 4 && !isdefined(A, :isomorphic_full_matrix_algebra)
-    #@show A
-    #@info "Quaternion case unit group"
     Q, QtoZA = isquaternion_algebra(ZA)
     MQ = _get_order_from_gens(Q, [QtoZA\(ZAtoA\(elem_in_algebra(b))) for b in absolute_basis(M)])
     _gens =  _unit_group_generators_quaternion(MQ)
@@ -2177,57 +2174,19 @@ end
 #
 ################################################################################
 
-function _unit_reps(M, F; dir = ".")
-  dec = decompose(algebra(M))
+function _unit_reps(M, F)
   D = get_attribute!(M, :unit_reps) do
     return Dict{typeof(F), Vector{Vector{elem_type(algebra(M))}}}()
   end::Dict{typeof(F), Vector{Vector{elem_type(algebra(M))}}}
 
   if haskey(D, F)
-    @info "Unit representatives cached for this conductor ideal"
+    @vprint :PIP "Unit representatives cached for this conductor ideal"
     return D[F]
   else
-    local u::Vector{Vector{elem_type(algebra(M))}}
-    _u = nothing # _find_unit_reps_in_file(M, F)
-    if _u !== nothing
-      u = _u
-    else
-      u = __unit_reps(M, F)
-      ii = 1
-      fname = joinpath(dir, "$(degree(M))_$(ii).tmpinfo")
-      while isfile(fname)
-        ii += 1
-        fname = joinpath(dir, "$(degree(M))_$(ii).tmpinfo")
-      end
-      dec = decompose(algebra(M))
-      k = length(dec)
-      idemsA = [dec[i][2](one(dec[i][1])) for i in 1:k]
-      #@info "Saving to file"
-      #@time _save_elements(fname, algebra(M), basis_matrix(M), basis_matrix(F), idemsA, u)
-    end
+    u = __unit_reps(M, F)
     D[F] = u
     return u
   end
-end
-
-function _find_unit_reps_in_file(M, F; dir = ".")
-  l = readdir(dir)
-  for file in l
-    if !isfile(file)
-      continue
-    end
-    if !endswith(file, ".tmpinfo")
-      continue
-    end
-    if !(_is_suitable_file(file, algebra(M), M, F; check_algebra = true))
-      continue
-    end
-    @info "Found unit reps in a file ... loading"
-    @time u = __test_load(file, algebra(M), M, F)
-    @info "done"
-    return u
-  end
-  return nothing
 end
 
 function _describe(B)
@@ -2242,11 +2201,9 @@ function _describe(B)
   if ismatalg
     return "Full matrix algebra of degree $n over field of degree $d"
   else
-    return "Divison ring of degree $n over field of degree $d"
+    return "Divison algebra of degree $n over field of degree $d"
   end
 end
-
-global _debug = []
 
 function __unit_reps_simple(M, F)
   #push!(_debug, (M, F))
@@ -2351,15 +2308,6 @@ function __unit_reps(M, F)
     push!(unit_reps, to_return)
   end
   return unit_reps
-end
-
-function _assert_has_refined_wedderburn_decomposition(A)
-  get_attribute!(A, :refined_wedderburn) do
-    dec = decompose(A)
-    _compute_matrix_algebras_from_reps2(A, dec)
-    return true
-  end
-  return true
 end
 
 function _get_a_twosided_conductor(O, M)
@@ -2974,181 +2922,3 @@ function _compute_local_coefficients_parallel(alpha, A, dec_sorted, units_sorted
   end
   return res
 end
-
-function parallel_mul(list, M, res)
-  par = collect(Iterators.partition(1:length(list), nrows(M)))
-  Ms = [deepcopy(M) for i in 1:nt]
-  #res = Vector{fmpq}[]
-  Threads.@threads for i in 1:length(par)
-    thi = Threads.threadid()
-    p = par[i]
-    t1 = tmps[thi]
-    t2 = tmps2[thi]
-    for (j, j_index) in enumerate(p)
-      u = list[j_index]
-      Hecke.__set_row!(t1, j, u)
-    end
-    mul!(t2, t1, M)
-    for (j, j_index) in enumerate(p)
-      Hecke.__set_row!(res[j_index], t2, j)
-      #push!(res, fmpq[t2[j, k] for k in 1:ncols(M)])
-    end
-  end
-  return res
-end
-
-function _save_elements(io::IO, A, bmat_order::FakeFmpqMat, bmat_conductor::FakeFmpqMat, idempotents::Vector, v::Vector)
-  println(io, _stringify(vec(A.mult_table)))
-  println(io, _stringify(_eltseq(fmpq_mat(bmat_order))))
-  bmatc = fmpq_mat(bmat_conductor)
-  bmatcc = change_base_ring(ZZ, denominator(bmatc) * bmatc)
-  @assert ishnf(bmatcc, :lowerleft)
-  println(io, _stringify(_eltseq(fmpq_mat(bmat_conductor))))
-  println(io, _stringify(coefficients.(idempotents)))
-  for i in 1:length(v)
-    w = v[i]
-    println(io, _stringify(length(w)))
-    for j in 1:length(w)
-      println(io, _stringify(coefficients(w[j], copy = false)))
-    end
-  end
-end
-
-function _save_elements(file::String, A, bmat_order, bmat_conductor, idempotents, v)
-  open(file, "w") do io
-    _save_elements(io, A, bmat_order, bmat_conductor, idempotents, v)
-  end
-end
-
-function _load_all(file, A)
-  open(file) do io
-    _load_all(io, A)
-  end
-end
-
-function _load_header(file::String)
-  open(file) do io
-    _load_header(io)
-  end
-end
-
-function _load_header(io::IO)
-  b, v = _parse(Vector{Int}, io)
-  n = length(v)
-  d = isqrt(n)
-  mult_table = reshape(v, (d, d))
-  b, v = _parse(Vector{fmpq}, io)
-  n = length(v)
-  d = isqrt(n)
-  @assert d^2 == n
-  bmat_order = FakeFmpqMat(matrix(QQ, d, d, v))
-  b, v = _parse(Vector{fmpq}, io)
-  bmat_conductor = FakeFmpqMat(matrix(QQ, d, d, v))
-  return mult_table, bmat_order, bmat_conductor
-end
-
-function _load_rest(io::IO, A)
-  b, v = _parse(Vector{Vector{fmpq}}, io)
-  idempotents = [A(v[i], copy = false) for i in 1:length(v)]
-  @assert sum(idempotents) == one(A)
-  k = length(v)
-  units = Vector{Vector{elem_type(A)}}(undef, k)
-  for i in 1:k
-    _, l = _parse(Int, io)
-    res = Vector{elem_type(A)}(undef, l)
-    for j in 1:l
-      _, v = _parse(Vector{fmpq}, io)
-      res[j] = A(v, copy = false)
-    end
-    units[i] = res
-  end
-  return idempotents, units
-end
-
-function _load_all(io::IO, A)
-  mult_table, bmat_order, bmat_conductor = _load_header(io)
-  idem, units = _load_rest(io, A)
-  return mult_table, bmat_order, bmat_conductor, idem, units
-end
-
-function _is_suitable_file(io::IO, A, M, F; check_algebra::Bool = false)
-  mult_table, bmat_order, bmat_conductor = _load_header(io)
-  if mult_table != A.mult_table
-    if check_algebra
-      return false
-    else
-      error("Multiplication tables do not match")
-    end
-  end
-  if basis_matrix(M) != bmat_order
-    @info "Orders do not coincide"
-    return false
-  end
-  if basis_matrix(F) != bmat_conductor
-    @info "Conductors do not coincide"
-    return false
-  end
-  @info "Conductors do coincide"
-  return true
-end
-
-function _is_suitable_file(file::String, A, M, F; check_algebra::Bool = false)
-  open(file) do io
-    _is_suitable_file(io, A, M, F, check_algebra = check_algebra)
-  end
-end
-
-function _load_units_from_rest(io::IO, A)
-  idempotents, units = _load_rest(io, A) 
-  #@info "Reordering if necessary"
-  dec = decompose(A)
-  k = length(dec)
-  perm = Int[]
-  idemsA = [dec[i][2](one(dec[i][1])) for i in 1:k]
-  @assert length(dec) == length(idempotents)
-  for i in 1:k
-    e = idemsA[i]
-    for j in 1:k
-      if idempotents[j]  == e
-        push!(perm, j)
-        break
-      end
-    end
-  end
-  @assert length(perm) == k
-  @assert idempotents[perm] == idemsA
-  _units = permute!(units, perm)
-  return _units
-end
-
-function __test_load(file::String, A, M, F)
-  local units
-  open(file) do io
-    fl = _is_suitable_file(io, A, M, F, check_algebra = true)
-    @assert fl
-    units = _load_units_from_rest(io, A)
-  end
-  return units
-end
-
-function _find_maximal_order_in_file(O; dir = ".")
-  l = readdir(dir)
-  for file in l
-    if !isfile(file)
-      continue
-    end
-    if !endswith(file, ".tmpinfo")
-      continue
-    end
-    mult_table, bmat_order, bmat_conductor = _load_header(file)
-    if algebra(O).mult_table != mult_table
-      continue
-    end
-    d = denominator(basis_matrix(O, copy = false) * inv(bmat_order))
-    if isone(d)
-      return Order(algebra(O), bmat_order)
-    end
-  end
-  return nothing
-end
-

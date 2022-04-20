@@ -40,10 +40,9 @@
 
     A = Hecke.quaternion_algebra2(4,36)
     @test Hecke.issplit(A)
-    A=Hecke.quaternion_algebra2(-1,-1)
-    O= Order(A, [A[i] for i=1:4])
-    @test Hecke.schur_index_at_real_plc(O)==2
-
+    A = Hecke.quaternion_algebra2(-1,-1)
+    O = Order(A, [A[i] for i=1:4])
+    @test schur_index(A) == 2
   end
 
   @testset "Crossed Product Order" begin
@@ -63,7 +62,7 @@
       end
     end
     A = Hecke.CrossedProductAlgebra(O, Autos, Coc)
-    @test Hecke.issplit(A)
+    @test issplit(A)
     O1 = Order(A, basis(A))
     d = discriminant(O1)
     fac1 = factor(discriminant(O))
@@ -112,6 +111,28 @@
     M = matrix_algebra(FlintQQ, 3)
     O = maximal_order(M)
     @test isone(abs(discriminant(O)))
+
+    # large one, triggers splitting
+    Qx, x = QQ["x"]
+    f = prod(x - i for i in 1:30)
+    A = AlgAss(f)
+    R = any_order(A)
+    M = MaximalOrder(R)
+    @test isone(abs(discriminant(M)))
+
+    G = small_group(6, 1)
+    QG = QQ[G]
+    ZG = Order(QG, basis(QG))
+    @test !ismaximal(ZG)
+
+    S = overorders(ZG)
+    for R in S
+      _ = maximal_order(R)
+    end
+    for R in S
+      _ = maximal_order(R)
+    end
+    @test count(ismaximal, S) == 2
   end
 
   @testset "rand" begin
@@ -128,5 +149,13 @@
 
       @test reproducible(m)
     end
+  end
+  
+  @testset "index" begin
+    G = small_group(2, 1)
+    QG = QQ[G]
+    R = Order(QG, basis(QG))
+    M = maximal_order(R)
+    @test (@inferred index(R, M)) == 2
   end
 end
